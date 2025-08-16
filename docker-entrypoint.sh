@@ -1,19 +1,34 @@
 #!/bin/sh
 set -e
 
-# Only run schema load if using MySQL storage
+# Optional: verbose logs during first setup
+echo "ZIPKIN_LOG_LEVEL=${ZIPKIN_LOG_LEVEL:-INFO}"
+echo "STORAGE_TYPE=${STORAGE_TYPE:-mem}"
+
 if [ "$STORAGE_TYPE" = "mysql" ]; then
-  echo "==> Ensuring Zipkin MySQL schema exists in DB: $MYSQL_DB"
+  : "${MYSQL_HOST:?MYSQL_HOST is required}"
+  : "${MYSQL_TCP_PORT:?MYSQL_TCP_PORT is required}"
+  : "${MYSQL_DB:?MYSQL_DB is required}"
+  : "${MYSQL_USER:?MYSQL_USER is required}"
+  : "${MYSQL_PASS:?MYSQL_PASS is required}"
 
-  mysql -h "$MYSQL_HOST" -P "$MYSQL_TCP_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASS" "$MYSQL_DB" -e "SELECT 1;" >/dev/null 2>&1 || {
-    echo "Database $MYSQL_DB not found, creating..."
-    mysql -h "$MYSQL_HOST" -P "$MYSQL_TCP_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASS" -e "CREATE DATABASE IF NOT EXISTS $MYSQL_DB;"
-  }
+  echo "==> Checking MySQL availability at $MYSQL_HOST:$MYSQL_TCP_PORT ..."
+  # wait for MySQL to be reachable (simple loop)
+  tries=30
+  until mysqladmin ping -h "$MYSQL_HOST" -P "$MYSQL_TCP_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASS" --silent || [ $tries -le 0 ]; do
+    tries=$((tries-1))
+    echo "   waiting for MySQL... ($tries)"
+    sleep 2
+  done
 
-  echo "==> Applying schema..."
+  echo "==> Ensuring database '$MYSQL_DB' exists ..."
+  mysql -h "$MYSQL_HOST" -P "$MYSQL_TCP_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASS" \
+    -e "CREATE DATABASE IF NOT EXISTS \`$MYSQL_DB\`;"
+
+  echo "==> Applying Zipkin schema (idempotent) ..."
   curl -sSL https://raw.githubusercontent.com/openzipkin/zipkin/develop/storage/mysql-v1/mysql.sql \
     | mysql -h "$MYSQL_HOST" -P "$MYSQL_TCP_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASS" "$MYSQL_DB" || true
 fi
 
-echo "==> Starting Zipkin..."
-exec java ${JAVA_OPTS} -jar /zipkin.jar
+echo "==> Starting Zipkin ..."
+exec java ${JAVA_OPTS} -Dzipkin.logging.level=${ZIPKIN_LOG_LEVEL:-INFO} -jar /zipkin.jar

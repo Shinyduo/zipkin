@@ -1,8 +1,13 @@
-# Use the official Zipkin image
 FROM openzipkin/zipkin:latest
 
-# Zipkin listens on 9411 by default
-EXPOSE 9411
+# Install MySQL client
+USER root
+RUN apt-get update && apt-get install -y mysql-client curl && rm -rf /var/lib/apt/lists/*
 
-# No extra CMD needed; the base image starts Zipkin
-# Environment options can be injected via Railway variables at deploy time.
+# Script to init schema if needed, then run Zipkin
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+USER zipkin
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
